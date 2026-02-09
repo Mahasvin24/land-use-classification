@@ -131,7 +131,7 @@ export default function FileUpload() {
 
         <div className="flex items-center justify-between">
           <div className="text-xs text-muted-foreground">
-            Classification model will generate color-coded results.
+            Your data is encrypted and never stored.
           </div>
           <Button disabled={!file} type="button">
             Process

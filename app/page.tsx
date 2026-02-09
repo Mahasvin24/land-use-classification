@@ -13,7 +13,7 @@ export default function Home() {
             Land Use Classification for Environmental Science Research
           </h1>
           <p className="max-w-2xl text-sm text-muted-foreground">
-            Upload satellite imagery for automated land use classification. Our model processes your images and returns color-coded visualizations, enabling rapid analysis of land cover patterns for research applications.
+            Upload satellite imagery for automated land use classification. Our model processes your images and returns color-coded classifications layered on top of the original image, enabling easy and quick analysis of land cover patterns for research applications.
           </p>
         </header>
         <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
