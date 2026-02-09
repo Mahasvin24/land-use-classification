@@ -39,14 +39,14 @@ export default function FileUpload() {
     <Card className="border-border/60 shadow-sm">
       <CardHeader className="space-y-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-xl">Upload imagery</CardTitle>
+          <CardTitle className="text-xl">Upload Satellite Imagery</CardTitle>
           <Badge variant="secondary" className="gap-1">
             <Sparkles className="h-3.5 w-3.5" />
-            UI preview
+            AI Powered
           </Badge>
         </div>
         <p className="text-sm text-muted-foreground">
-          Drag and drop a satellite image or browse from your device.
+          Upload satellite imagery to generate color-coded land use classifications. Supports standard geospatial image formats.
         </p>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -69,10 +69,10 @@ export default function FileUpload() {
           </div>
           <div className="space-y-1">
             <p className="text-sm font-medium">
-              {file ? "File ready to process" : "Drop your image here"}
+              {file ? "Image ready for classification" : "Drop satellite imagery here"}
             </p>
             <p className="text-xs text-muted-foreground">
-              PNG, JPG, or TIFF up to 25MB
+              Supported formats: PNG, JPG, TIFF (max 25MB)
             </p>
           </div>
           <Button variant="secondary" type="button" onClick={handlePickFile}>
@@ -93,7 +93,7 @@ export default function FileUpload() {
               <div>
                 <p className="text-sm font-medium">{file.name}</p>
                 <p className="text-xs text-muted-foreground">
-                  {formatBytes(file.size)} • Ready to process
+                  {formatBytes(file.size)} • Ready for classification
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -119,9 +119,9 @@ export default function FileUpload() {
           ) : (
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium">No file selected</p>
+                <p className="text-sm font-medium">No image selected</p>
                 <p className="text-xs text-muted-foreground">
-                  Choose a file to see processing details.
+                  Upload satellite imagery to begin classification analysis.
                 </p>
               </div>
               <Badge variant="outline">Waiting</Badge>
@@ -131,10 +131,10 @@ export default function FileUpload() {
 
         <div className="flex items-center justify-between">
           <div className="text-xs text-muted-foreground">
-            Processing starts once you upload.
+            Classification model will generate color-coded results.
           </div>
           <Button disabled={!file} type="button">
-            Upload and process
+            Process
           </Button>
         </div>
       </CardContent>
