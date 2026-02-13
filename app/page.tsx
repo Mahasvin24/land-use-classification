@@ -7,7 +7,7 @@ export default function Home() {
       <div className="container mx-auto px-4 py-10">
         <header className="mb-8 space-y-2">
           <p className="text-sm font-medium text-muted-foreground">
-            ACM Project Series &apos;26
+            UCSB Data Science Project Series &apos;26
           </p>
           <h1 className="text-3xl font-semibold tracking-tight">
             Land Use Classification for Environmental Science Research
