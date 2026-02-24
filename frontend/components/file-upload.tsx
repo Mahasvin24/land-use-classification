@@ -1,13 +1,16 @@
 "use client"
 
+import { useRef, useState } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ImageUp, Sparkles, X } from "lucide-react";
-import { useRef, useState } from "react";
 
-const MAX_FILES = 500;
+const VIRTUALIZE_FILE_LIST_THRESHOLD = 100;
+
+const DEFAULT_MAX_FILES = 500;
 
 type FileUploadProps = {
   onProcess?: (files: File[]) => void;
@@ -15,6 +18,7 @@ type FileUploadProps = {
   processError?: string | null;
   clearProcessError?: () => void;
   compactView?: boolean;
+  maxFiles?: number;
 };
 
 function formatBytes(bytes: number) {
@@ -32,10 +36,20 @@ export default function FileUpload({
   processError = null,
   clearProcessError,
   compactView = false,
+  maxFiles = DEFAULT_MAX_FILES,
 }: FileUploadProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const fileListRef = useRef<HTMLDivElement>(null);
+
+  const useFileListVirtual = compactView && files.length > VIRTUALIZE_FILE_LIST_THRESHOLD;
+  const fileListVirtualizer = useVirtualizer({
+    count: files.length,
+    getScrollElement: () => fileListRef.current,
+    estimateSize: () => 28,
+    overscan: 5,
+  });
 
   const totalBytes = files.reduce((sum, f) => sum + f.size, 0);
 
@@ -43,7 +57,7 @@ export default function FileUpload({
     const selected = e.target.files;
     if (!selected?.length) return;
     const next = Array.from(selected);
-    const added = next.length > MAX_FILES ? next.slice(0, MAX_FILES) : next;
+    const added = next.length > maxFiles ? next.slice(0, maxFiles) : next;
     setFiles(added);
     e.target.value = "";
   };
@@ -56,7 +70,7 @@ export default function FileUpload({
     const added = Array.from(dropped);
     setFiles((prev) => {
       const combined = [...prev, ...added];
-      return combined.length > MAX_FILES ? combined.slice(0, MAX_FILES) : combined;
+      return combined.length > maxFiles ? combined.slice(0, maxFiles) : combined;
     });
   };
 
@@ -83,7 +97,7 @@ export default function FileUpload({
         </div>
         <p className="text-sm text-muted-foreground">
           Upload one or many satellite images to generate color-coded land use
-          classifications. Up to {MAX_FILES} files.
+          classifications. Up to {maxFiles} files.
         </p>
       </CardHeader>
       <CardContent className="space-y-5">
@@ -168,33 +182,76 @@ export default function FileUpload({
               </div>
               {compactView ? (
                 <div
-                  className="max-h-[140px] overflow-y-auto rounded-md border bg-background/60 px-2 py-1.5 font-mono text-xs space-y-0.5"
+                  ref={fileListRef}
+                  className="max-h-[140px] overflow-y-auto rounded-md border bg-background/60 px-2 py-1.5 font-mono text-xs"
                   role="list"
                 >
-                  {files.map((file, index) => (
+                  {useFileListVirtual ? (
                     <div
-                      key={`${file.name}-${index}`}
-                      className="flex items-center justify-between gap-2"
-                      role="listitem"
+                      style={{
+                        height: `${fileListVirtualizer.getTotalSize()}px`,
+                        width: "100%",
+                        position: "relative",
+                      }}
                     >
-                      <span
-                        className="min-w-0 flex-1 truncate"
-                        title={file.name}
-                      >
-                        {index + 1}. {file.name}
-                      </span>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        type="button"
-                        className="h-6 w-6 shrink-0 opacity-70 hover:opacity-100"
-                        aria-label={`Remove ${file.name}`}
-                        onClick={() => removeFile(index)}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
+                      {fileListVirtualizer.getVirtualItems().map((virtualRow) => {
+                        const file = files[virtualRow.index];
+                        const index = virtualRow.index;
+                        return (
+                          <div
+                            key={`${file.name}-${virtualRow.key}`}
+                            style={{
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              width: "100%",
+                              transform: `translateY(${virtualRow.start}px)`,
+                            }}
+                            className="flex items-center justify-between gap-2 py-0.5"
+                            role="listitem"
+                          >
+                            <span className="min-w-0 flex-1 truncate" title={file.name}>
+                              {index + 1}. {file.name}
+                            </span>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              type="button"
+                              className="h-6 w-6 shrink-0 opacity-70 hover:opacity-100"
+                              aria-label={`Remove ${file.name}`}
+                              onClick={() => removeFile(index)}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ))}
+                  ) : (
+                    <div className="space-y-0.5">
+                      {files.map((file, index) => (
+                        <div
+                          key={`${file.name}-${index}`}
+                          className="flex items-center justify-between gap-2"
+                          role="listitem"
+                        >
+                          <span className="min-w-0 flex-1 truncate" title={file.name}>
+                            {index + 1}. {file.name}
+                          </span>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            type="button"
+                            className="h-6 w-6 shrink-0 opacity-70 hover:opacity-100"
+                            aria-label={`Remove ${file.name}`}
+                            onClick={() => removeFile(index)}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div
