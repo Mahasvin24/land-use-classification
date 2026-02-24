@@ -216,11 +216,11 @@ export default function Home() {
                   <input
                     id="batch-size-input"
                     type="number"
-                    min={25}
+                    min={1}
                     max={500}
                     step={25}
                     value={batchSize}
-                    onChange={(e) => setBatchSize(Math.max(25, Math.min(500, Number(e.target.value) || 100)))}
+                    onChange={(e) => setBatchSize(Math.max(1, Math.min(500, Number(e.target.value) || 100)))}
                     className="h-8 w-20 rounded-md border border-input bg-background px-2 text-sm"
                   />
                 </div>
