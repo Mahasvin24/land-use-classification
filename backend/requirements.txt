@@ -5,3 +5,5 @@ numpy
 pillow
 joblib
 python-multipart
+rasterio
+matplotlib
