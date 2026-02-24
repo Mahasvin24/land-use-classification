@@ -41,8 +41,6 @@ export default function Home() {
   const [autoDownloadWhenFull, setAutoDownloadWhenFull] = useState(false);
   const maxResultsInMemory = 500;
   const [batchSize, setBatchSize] = useState(100);
-  const [continueOnError, setContinueOnError] = useState(false);
-  const [failedFiles, setFailedFiles] = useState<{ filename: string; error: string }[]>([]);
   const [concurrency, setConcurrency] = useState(1);
 
   const CACHE_KEY_RESULTS = "luc_processed_results_v1";
@@ -113,7 +111,6 @@ export default function Home() {
     if (!files.length) return;
     setIsProcessing(true);
     setProcessError(null);
-    setFailedFiles([]);
     const concurrencyLimit = Math.max(1, Math.min(5, concurrency));
     try {
       if (concurrencyLimit === 1) {
@@ -131,11 +128,7 @@ export default function Home() {
               });
             }
           } catch (e) {
-            if (continueOnError) {
-              setFailedFiles((f) => [...f, { filename: file.name, error: e instanceof Error ? e.message : "Processing failed" }]);
-            } else {
-              throw e;
-            }
+            throw e;
           }
         }
       } else {
@@ -157,20 +150,14 @@ export default function Home() {
               });
             }
           } catch (e) {
-            if (continueOnError) {
-              setFailedFiles((f) => [...f, { filename: file.name, error: e instanceof Error ? e.message : "Processing failed" }]);
-            } else {
-              setProcessError(e instanceof Error ? e.message : "Processing failed");
-            }
+            setProcessError(e instanceof Error ? e.message : "Processing failed");
           }
           await processNext();
         };
         await Promise.all(Array.from({ length: concurrencyLimit }, () => processNext()));
       }
     } catch (e) {
-      if (!continueOnError) {
-        setProcessError(e instanceof Error ? e.message : "Processing failed");
-      }
+      setProcessError(e instanceof Error ? e.message : "Processing failed");
     } finally {
       setIsProcessing(false);
     }
@@ -240,17 +227,6 @@ export default function Home() {
               </>
             )}
             <div className="flex items-center gap-2">
-              <label htmlFor="continue-on-error-toggle" className="text-sm text-muted-foreground cursor-pointer select-none whitespace-nowrap">
-                Continue on error
-              </label>
-              <Switch
-                id="continue-on-error-toggle"
-                checked={continueOnError}
-                onCheckedChange={setContinueOnError}
-                aria-label="Continue processing when a file fails"
-              />
-            </div>
-            <div className="flex items-center gap-2">
               <label htmlFor="concurrency-input" className="text-sm text-muted-foreground whitespace-nowrap">
                 Concurrent
               </label>
@@ -267,27 +243,6 @@ export default function Home() {
             </div>
           </div>
         </div>
-        {failedFiles.length > 0 && (
-          <div className="mb-4 rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm">
-            <p className="font-medium text-amber-700 dark:text-amber-400">
-              {failedFiles.length} file{failedFiles.length !== 1 ? "s" : ""} failed
-            </p>
-            <ul className="mt-1 max-h-24 overflow-y-auto list-disc list-inside text-muted-foreground">
-              {failedFiles.map((f, i) => (
-                <li key={`${f.filename}-${i}`} title={f.error}>
-                  {f.filename}: {f.error}
-                </li>
-              ))}
-            </ul>
-            <button
-              type="button"
-              onClick={() => setFailedFiles([])}
-              className="mt-2 text-xs underline text-muted-foreground hover:text-foreground"
-            >
-              Dismiss
-            </button>
-          </div>
-        )}
         <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
           <FileUpload
             onProcess={handleProcess}
