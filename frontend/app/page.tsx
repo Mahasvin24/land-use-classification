@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react";
+import { Switch } from "@/components/ui/switch";
 import FileUpload from "@/components/file-upload";
 import ProcessedFiles from "@/components/processed-files";
 
@@ -16,6 +17,7 @@ export default function Home() {
   const [processedResults, setProcessedResults] = useState<ProcessedResult[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
   const [processError, setProcessError] = useState<string | null>(null);
+  const [compactView, setCompactView] = useState(false);
 
   const apiBase =
     typeof window !== "undefined"
@@ -70,15 +72,31 @@ export default function Home() {
             Upload satellite imagery for automated land use classification. Our model processes your images and returns color-coded classifications layered on top of the original image, enabling easy and quick analysis of land cover patterns for research applications.
           </p>
         </header>
+        <div className="mb-4 flex items-center justify-end gap-3">
+          <label
+            htmlFor="compact-view-toggle"
+            className="text-sm font-medium text-muted-foreground cursor-pointer select-none"
+          >
+            Compact view
+          </label>
+          <Switch
+            id="compact-view-toggle"
+            checked={compactView}
+            onCheckedChange={setCompactView}
+            aria-label="Toggle compact view for input and output"
+          />
+        </div>
         <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
           <FileUpload
             onProcess={handleProcess}
             isProcessing={isProcessing}
             processError={processError}
             clearProcessError={() => setProcessError(null)}
+            compactView={compactView}
           />
           <ProcessedFiles
             processedResults={processedResults}
+            compactView={compactView}
             onClearResults={() => setProcessedResults([])}
           />
         </div>

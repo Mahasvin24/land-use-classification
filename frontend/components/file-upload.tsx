@@ -14,6 +14,7 @@ type FileUploadProps = {
   isProcessing?: boolean;
   processError?: string | null;
   clearProcessError?: () => void;
+  compactView?: boolean;
 };
 
 function formatBytes(bytes: number) {
@@ -30,6 +31,7 @@ export default function FileUpload({
   isProcessing = false,
   processError = null,
   clearProcessError,
+  compactView = false,
 }: FileUploadProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -140,6 +142,11 @@ export default function FileUpload({
                   )}
                 </p>
                 <div className="flex items-center gap-2">
+                  {compactView && (
+                    <Badge variant="outline" className="text-[10px] uppercase tracking-wide">
+                      Compact mode
+                    </Badge>
+                  )}
                   <Button
                     size="sm"
                     variant="outline"
@@ -159,38 +166,70 @@ export default function FileUpload({
                   </Button>
                 </div>
               </div>
-              <div
-                className="max-h-[220px] overflow-y-auto rounded-md border bg-background/60 pr-1 space-y-0.5"
-                role="list"
-              >
-                {files.map((file, index) => (
-                  <div
-                    key={`${file.name}-${index}`}
-                    className="flex items-center justify-between gap-2 rounded px-2 py-1.5 text-left hover:bg-muted/60 group/item"
-                    role="listitem"
-                  >
-                    <span
-                      className="min-w-0 flex-1 truncate text-sm"
-                      title={file.name}
+              {compactView ? (
+                <div
+                  className="max-h-[140px] overflow-y-auto rounded-md border bg-background/60 px-2 py-1.5 font-mono text-xs space-y-0.5"
+                  role="list"
+                >
+                  {files.map((file, index) => (
+                    <div
+                      key={`${file.name}-${index}`}
+                      className="flex items-center justify-between gap-2"
+                      role="listitem"
                     >
-                      {file.name}
-                    </span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {formatBytes(file.size)}
-                    </span>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      type="button"
-                      className="h-7 w-7 shrink-0 opacity-70 hover:opacity-100 group-hover/item:opacity-100"
-                      aria-label={`Remove ${file.name}`}
-                      onClick={() => removeFile(index)}
+                      <span
+                        className="min-w-0 flex-1 truncate"
+                        title={file.name}
+                      >
+                        {index + 1}. {file.name}
+                      </span>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        type="button"
+                        className="h-6 w-6 shrink-0 opacity-70 hover:opacity-100"
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() => removeFile(index)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div
+                  className="max-h-[220px] overflow-y-auto rounded-md border bg-background/60 pr-1 space-y-0.5"
+                  role="list"
+                >
+                  {files.map((file, index) => (
+                    <div
+                      key={`${file.name}-${index}`}
+                      className="flex items-center justify-between gap-2 rounded px-2 py-1.5 text-left hover:bg-muted/60 group/item"
+                      role="listitem"
                     >
-                      <X className="h-3.5 w-3.5" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
+                      <span
+                        className="min-w-0 flex-1 truncate text-sm"
+                        title={file.name}
+                      >
+                        {file.name}
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {formatBytes(file.size)}
+                      </span>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        type="button"
+                        className="h-7 w-7 shrink-0 opacity-70 hover:opacity-100 group-hover/item:opacity-100"
+                        aria-label={`Remove ${file.name}`}
+                        onClick={() => removeFile(index)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           ) : (
             <div className="flex items-center justify-between">

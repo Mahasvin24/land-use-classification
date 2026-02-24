@@ -1,25 +1,24 @@
 "use client"
-
-import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { ImageIcon, Scan, CheckCircle2, Download, LayoutGrid, List } from "lucide-react";
+import { ImageIcon, Scan, CheckCircle2, Download } from "lucide-react";
 import JSZip from "jszip";
 import type { ProcessedResult } from "@/app/page";
 
 type ProcessedFilesProps = {
   processedResults: ProcessedResult[];
   onClearResults?: () => void;
+  compactView?: boolean;
 };
 
 export default function ProcessedFiles({
   processedResults,
   onClearResults,
+  compactView = false,
 }: ProcessedFilesProps) {
   const hasResults = processedResults.length > 0;
-  const [compactView, setCompactView] = useState(false);
 
   const handleDownloadAll = async () => {
     const zip = new JSZip();
@@ -43,27 +42,6 @@ export default function ProcessedFiles({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <CardTitle className="text-xl">Processed output</CardTitle>
           <div className="flex items-center gap-2">
-            {hasResults && (
-              <Button
-                variant={compactView ? "secondary" : "outline"}
-                size="sm"
-                onClick={() => setCompactView(!compactView)}
-                className="gap-1.5 shrink-0"
-                title={compactView ? "Switch to detailed view" : "Switch to compact view for many files"}
-              >
-                {compactView ? (
-                  <>
-                    <List className="h-3.5 w-3.5" />
-                    Detailed view
-                  </>
-                ) : (
-                  <>
-                    <LayoutGrid className="h-3.5 w-3.5" />
-                    Compact view
-                  </>
-                )}
-              </Button>
-            )}
             <Badge
               variant={hasResults ? "default" : "outline"}
               className="gap-1 shrink-0"
