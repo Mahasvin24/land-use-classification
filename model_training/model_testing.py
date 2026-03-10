@@ -2,80 +2,85 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
+import joblib
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score, 
     cohen_kappa_score, 
     confusion_matrix, 
     classification_report
 )
-import joblib
 
-features = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12', 'NDVI', 'entropy']
+# --- 1. SETUP ---
+# Update these paths to your local file locations
+csv_path = 'final_combined_dataset.csv'
+model_path = 'optimized_model.pkl'
 
+df = pd.read_csv(csv_path)
+model = joblib.load(model_path)
 
-# 1. Load your data and model 
-# Replace these with your actual local file paths
-val_path = 'C:\\Users\\micoc\\OneDrive\\Documents\\GitHub\\land-use-classification\\val_v4_final.csv'
-
-
-df_val = pd.read_csv(val_path)
-X_val = df_val[features]
-
-model = joblib.load('C:\\Users\\micoc\\OneDrive\\Documents\\GitHub\\land-use-classification\\optimized_model.pkl')
-
+# --- 2. FEATURE ALIGNMENT ---
+# We extract the exact features the model was built to use
 try:
-    expected_features = model.feature_names_in_
-    print("Model expects:", expected_features)
-    
-    # Reorder/subset X_val to match the model exactly
-    X_val = df_val[expected_features]
+    features = model.feature_names_in_.tolist()
+    print(f"Model loaded. Testing on the following {len(features)} features:")
+    print(features)
 except AttributeError:
-    print("Model doesn't have feature_names_in_. Ensure your 'features' list is manually correct.")
-    X_val = df_val[features]
+    # Fallback if the model doesn't store feature names
+    features = ['B1', 'B2', 'B3', 'B4', 'B5', 'B8', 'B11', 'B12', 'NDVI', 'NDBI', 'MNDWI', 'BSI']
+    print("Warning: Model feature names not found. Using default spectral list.")
 
-y_true = df_val['lc']
-y_pred = model.predict(X_val) 
+# --- 3. THE "HONEST" SPLIT ---
+# To get an accurate report, we must isolate the 20% of data 
+# that the model did NOT use during training.
+X = df[features]
+y = df['lc']
 
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.20, stratify=y, random_state=42
+)
 
+# --- 4. RUN PREDICTIONS ---
+# We predict ONLY on the Test Set (Unseen Data)
+y_pred = model.predict(X_test)
 
+# --- 5. CALCULATE ACCURACIES ---
+overall_acc = accuracy_score(y_test, y_pred)
+kappa = cohen_kappa_score(y_test, y_pred)
 
-# 2. Basic Accuracy & Kappa
-overall_acc = accuracy_score(y_true, y_pred)
-kappa = cohen_kappa_score(y_true, y_pred)
+# Confusion Matrix
+labels = sorted(y.unique())
+cm = confusion_matrix(y_test, y_pred, labels=labels)
 
-# 3. Confusion Matrix
-labels = sorted(y_true.unique()) # Get unique class names
-cm = confusion_matrix(y_true, y_pred, labels=labels)
+# Producer's Accuracy (How well the model maps the real world)
+producers_acc = np.diag(cm) / np.sum(cm, axis=1) 
+# User's Accuracy (How reliable the map is for a person on the ground)
+users_acc = np.diag(cm) / np.sum(cm, axis=0)
 
-# 4. Producer's and User's Accuracy (Adjusted Metrics)
-# In Land Use, "Adjusted" often refers to class-specific accuracies
-cm_diag = np.diag(cm)
-producers_acc = cm_diag / np.sum(cm, axis=0) # Accuracy from map maker perspective
-users_acc = cm_diag / np.sum(cm, axis=1)    # Accuracy from map user perspective
+# --- 6. PRINT ACCURATE REPORT ---
+print("\n" + "="*45)
+print("      FINAL VALIDATION REPORT (UNSEEN DATA)")
+print("="*45)
+print(f"TRUE OVERALL ACCURACY: {overall_acc:.4f}")
+print(f"KAPPA COEFFICIENT:     {kappa:.4f}")
+print("-" * 45)
 
-# --- Results Output ---
-print(f"Overall Accuracy: {overall_acc:.4f}")
-print(f"Kappa Coefficient: {kappa:.4f}")
-print("\nClassification Report:")
-print(classification_report(y_true, y_pred, target_names=[str(label) for label in labels]))
+# Class Metrics Table
+accuracy_table = pd.DataFrame({
+    'Class_ID': labels,
+    'Producer_Accuracy': producers_acc,
+    'User_Accuracy': users_acc
+})
+print("\nClass-Specific Performance:")
+print(accuracy_table.to_string(index=False))
 
-# Plotting the Confusion Matrix
+print("\nFull Classification Report:")
+print(classification_report(y_test, y_pred))
+
+# --- 7. VISUALIZE ---
 plt.figure(figsize=(10, 7))
 sns.heatmap(cm, annot=True, fmt='d', xticklabels=labels, yticklabels=labels, cmap='Blues')
-plt.xlabel('Predicted Label')
-plt.ylabel('True Label')
-plt.title('Land Use Classification Confusion Matrix')
-plt.show()
-
-
-
-importances = model.feature_importances_
-feature_names = X_val.columns
-feature_importance_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances})
-feature_importance_df = feature_importance_df.sort_values(by='Importance', ascending=False)
-
-# Plot
-plt.figure(figsize=(10, 6))
-sns.barplot(x='Importance', y='Feature', data=feature_importance_df)
-plt.title('Which factors are actually helping?')
+plt.title('Validation Confusion Matrix (Testing on 20% Unseen Data)')
+plt.ylabel('True Ground Truth')
+plt.xlabel('Model Prediction')
 plt.show()
