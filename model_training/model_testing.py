@@ -13,7 +13,7 @@ from sklearn.metrics import (
 
 # --- 1. SETUP ---
 # Update these paths to your local file locations
-csv_path = 'final_combined_dataset_timeseries.csv'
+csv_path = 'final_combined_dataset_temporal_trained.csv'
 model_path = 'optimized_model_temporal.pkl'
 
 df = pd.read_csv(csv_path)
@@ -27,7 +27,9 @@ try:
     print(features)
 except AttributeError:
     # Fallback if the model doesn't store feature names
-    features = ['B1', 'B2', 'B3', 'B4', 'B5', 'B8', 'B11', 'B12', 'NDVI', 'NDBI', 'MNDWI', 'BSI']
+    features = ['NDVI_mean', 'NDVI_stdDev', 'NDBI_mean', 'NDBI_stdDev', 
+                'MNDWI_mean', 'MNDWI_stdDev', 'BSI_mean', 'BSI_stdDev', 
+                'EVI_mean', 'EVI_stdDev', 'NDVI_slope', 'NDVI_rel_var', 'NDBI_rel_var']
     print("Warning: Model feature names not found. Using default spectral list.")
 
 # --- 3. THE "HONEST" SPLIT ---
