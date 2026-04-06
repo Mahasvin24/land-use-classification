@@ -13,8 +13,8 @@ from sklearn.metrics import (
 
 # --- 1. SETUP ---
 # Update these paths to your local file locations
-csv_path = 'final_combined_dataset_temporal_trained.csv'
-model_path = 'optimized_model_temporal.pkl'
+csv_path = 'land_use_harmonic_all.csv'
+model_path = 'harmonic_rf_model.pkl'
 
 df = pd.read_csv(csv_path)
 model = joblib.load(model_path)
