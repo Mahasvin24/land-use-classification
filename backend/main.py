@@ -25,7 +25,7 @@ app.add_middleware(
 )
 
 # Load model once at startup; path relative to this file so CWD doesn't matter
-MODEL_PATH = Path(__file__).resolve().parent / "model.pkl"
+MODEL_PATH = Path(__file__).resolve().parent / "optimized_model_temporal.pkl"
 if not MODEL_PATH.exists():
     raise FileNotFoundError(
         f"Model file not found at {MODEL_PATH}. "
