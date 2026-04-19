@@ -9,7 +9,7 @@ import re
 import joblib
 import numpy as np
 import rasterio
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from matplotlib.colors import ListedColormap
 import matplotlib
@@ -72,6 +72,62 @@ CLASS_LABELS = {
 }
 CUSTOM_CMAP = ListedColormap(CLASS_COLORS)
 
+# Post-classification spatial smoothing. A per-pixel classifier can produce
+# salt-and-pepper noise: a lone Grassland pixel surrounded by Built-up is
+# almost certainly Built-up that the model got wrong. A small majority filter
+# reclassifies each pixel to the most common class in its neighborhood,
+# cleaning up isolated misclassifications while preserving real boundaries.
+DEFAULT_SMOOTHING_WINDOW = 3
+
+
+def majority_filter(prediction_map: np.ndarray, window_size: int = DEFAULT_SMOOTHING_WINDOW) -> np.ndarray:
+    """Replace each pixel with the most common class in its NxN neighborhood.
+
+    Implementation notes:
+    - For each class id c, build a binary mask and count how many of its
+      pixels fall inside the window around every pixel, using a summed-area
+      table (integral image) so the whole pass is O(H*W) per class rather
+      than O(H*W*window^2).
+    - Edges are padded with the nearest edge value, so border pixels still
+      get a full window vote (their out-of-bounds neighbors echo the edge).
+    - Ties resolve to the lower class id, which matches how `np.unique`
+      orders its output.
+    """
+    if window_size is None or window_size <= 1:
+        return prediction_map
+    if window_size % 2 == 0:
+        window_size += 1
+    if prediction_map.ndim != 2:
+        return prediction_map
+
+    h, w = prediction_map.shape
+    pad = window_size // 2
+    classes = np.unique(prediction_map)
+    if classes.size <= 1:
+        return prediction_map
+
+    best_count = np.full((h, w), -1, dtype=np.int32)
+    smoothed = np.empty_like(prediction_map)
+
+    for c in classes:
+        mask = (prediction_map == c).astype(np.int32)
+        padded = np.pad(mask, pad, mode="edge")
+        sat = np.zeros((padded.shape[0] + 1, padded.shape[1] + 1), dtype=np.int32)
+        sat[1:, 1:] = padded.cumsum(axis=0).cumsum(axis=1)
+        bottom = window_size
+        right = window_size
+        counts = (
+            sat[bottom : bottom + h, right : right + w]
+            - sat[0:h, right : right + w]
+            - sat[bottom : bottom + h, 0:w]
+            + sat[0:h, 0:w]
+        )
+        winning = counts > best_count
+        smoothed = np.where(winning, c, smoothed)
+        best_count = np.where(winning, counts, best_count)
+
+    return smoothed.astype(prediction_map.dtype)
+
 
 def preprocess_geotiff(contents: bytes, n_features: int):
     """
@@ -119,7 +175,19 @@ def build_preview_base64(prediction_map: np.ndarray) -> str:
 
 
 @app.post("/predict")
-async def predict(file: UploadFile = File(...)):
+async def predict(
+    file: UploadFile = File(...),
+    smoothing_window: int = Query(
+        DEFAULT_SMOOTHING_WINDOW,
+        ge=0,
+        le=11,
+        description=(
+            "Side length of the square majority filter applied after "
+            "classification to clean up isolated misclassified pixels. "
+            "Use 0 or 1 to disable smoothing."
+        ),
+    ),
+):
     if model is None:
         raise HTTPException(
             status_code=503,
@@ -150,6 +218,7 @@ async def predict(file: UploadFile = File(...)):
             detail=f"Prediction size {prediction.shape[0]} does not match image pixels {h * w}.",
         )
     prediction_map = prediction.reshape(h, w)
+    prediction_map = majority_filter(prediction_map, window_size=smoothing_window)
 
     preview_image_base64 = build_preview_base64(prediction_map)
 
@@ -163,6 +232,7 @@ async def predict(file: UploadFile = File(...)):
         "filename": filename,
         "preview_image_base64": preview_image_base64,
         "class_legend": CLASS_LABELS,
+        "smoothing_window": int(smoothing_window),
     }
 
 
@@ -248,7 +318,19 @@ def _oscilla_harmonic_features(dates, series_stack):
 
 
 @app.post("/predict_oscilla")
-async def predict_oscilla(files: List[UploadFile] = File(...)):
+async def predict_oscilla(
+    files: List[UploadFile] = File(...),
+    smoothing_window: int = Query(
+        DEFAULT_SMOOTHING_WINDOW,
+        ge=0,
+        le=11,
+        description=(
+            "Side length of the square majority filter applied after "
+            "classification to clean up isolated misclassified pixels. "
+            "Use 0 or 1 to disable smoothing."
+        ),
+    ),
+):
     if oscilla_model is None:
         raise HTTPException(
             status_code=503,
@@ -373,6 +455,7 @@ async def predict_oscilla(files: List[UploadFile] = File(...)):
             ),
         )
     prediction_map = prediction.reshape(h, w)
+    prediction_map = majority_filter(prediction_map, window_size=smoothing_window)
 
     preview_image_base64 = build_preview_base64(prediction_map)
     prediction_list = prediction_map.tolist()
@@ -389,4 +472,5 @@ async def predict_oscilla(files: List[UploadFile] = File(...)):
         "preview_image_base64": preview_image_base64,
         "class_legend": CLASS_LABELS,
         "n_dates": len(dates_sorted),
+        "smoothing_window": int(smoothing_window),
     }
