@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -13,8 +14,13 @@ const VIRTUALIZE_FILE_LIST_THRESHOLD = 100;
 const DEFAULT_MAX_FILES = 500;
 
 type FileUploadProps = {
+  /** When both are set, the file list is controlled by the parent (e.g. per-model buckets). */
+  files?: File[];
+  onFilesChange?: (files: File[]) => void;
   onProcess?: (files: File[]) => void;
   isProcessing?: boolean;
+  /** Shown next to the spinner while `isProcessing` is true (e.g. "Processing 2 of 5"). */
+  processingStatusLine?: string | null;
   processError?: string | null;
   clearProcessError?: () => void;
   compactView?: boolean;
@@ -35,18 +41,27 @@ function formatBytes(bytes: number) {
 }
 
 export default function FileUpload({
+  files: controlledFiles,
+  onFilesChange,
   onProcess,
   isProcessing = false,
+  processingStatusLine = null,
   processError = null,
   clearProcessError,
   compactView = false,
   maxFiles = DEFAULT_MAX_FILES,
   title = "Upload Satellite Imagery",
   description = "Upload one or many satellite images to generate color-coded land use classifications.",
-  processActionLabel = "Process",
+  processActionLabel = "Analyze",
   helperText,
 }: FileUploadProps) {
-  const [files, setFiles] = useState<File[]>([]);
+  const [internalFiles, setInternalFiles] = useState<File[]>([]);
+  const isControlled = controlledFiles !== undefined && onFilesChange !== undefined;
+  const files = isControlled ? controlledFiles : internalFiles;
+  const setFiles = (next: File[]) => {
+    if (isControlled) onFilesChange!(next);
+    else setInternalFiles(next);
+  };
   const [isDragging, setIsDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const fileListRef = useRef<HTMLDivElement>(null);
@@ -76,14 +91,12 @@ export default function FileUpload({
     const dropped = event.dataTransfer.files;
     if (!dropped?.length) return;
     const added = Array.from(dropped);
-    setFiles((prev) => {
-      const combined = [...prev, ...added];
-      return combined.length > maxFiles ? combined.slice(0, maxFiles) : combined;
-    });
+    const combined = [...files, ...added];
+    setFiles(combined.length > maxFiles ? combined.slice(0, maxFiles) : combined);
   };
 
   const removeFile = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setFiles(files.filter((_, i) => i !== index));
   };
 
   const clearAll = () => {
@@ -330,13 +343,26 @@ export default function FileUpload({
             </p>
           )}
           <Button
+            variant={isProcessing ? "outline" : "default"}
             disabled={files.length === 0 || isProcessing}
             type="button"
             onClick={() => onProcess?.(files)}
+            className={cn(
+              isProcessing && "max-w-full min-w-0 sm:max-w-md",
+              isProcessing &&
+                "disabled:cursor-wait disabled:opacity-100 disabled:text-foreground [&_svg]:text-foreground"
+            )}
           >
-            {isProcessing
-              ? "Processing…"
-              : `${processActionLabel}${files.length > 0 ? ` (${files.length} file${files.length !== 1 ? "s" : ""})` : ""}`}
+            {isProcessing ? (
+              <>
+                <Spinner className="size-4 shrink-0" />
+                <span className="min-w-0 truncate text-left font-normal">
+                  {processingStatusLine ?? "Processing…"}
+                </span>
+              </>
+            ) : (
+              `${processActionLabel}${files.length > 0 ? ` (${files.length} file${files.length !== 1 ? "s" : ""})` : ""}`
+            )}
           </Button>
         </div>
       </CardContent>

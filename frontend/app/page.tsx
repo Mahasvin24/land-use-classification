@@ -25,6 +25,8 @@ type ModelConfig = {
   uploadHelperText?: string;
   resultsCardTitle: string;
   resultsDescription: string;
+  /** Shown in the results panel when there is nothing to display yet. */
+  resultsEmptyHint: string;
   outputFormatLabel: string;
   processActionLabel: string;
 };
@@ -34,28 +36,31 @@ const modelConfig: Record<ModelOption, ModelConfig> = {
     maxFiles: 500,
     showLargeScaleControls: true,
     uploadCardTitle: "Upload Satellite Imagery",
-    uploadDescription:
-      "Upload one or many satellite images to generate Terrae v2.3 color-coded land use classifications.",
+    uploadDescription: "Many GeoTIFFs → color-coded land cover per image.",
     resultsCardTitle: "Terrae v2.3 output",
-    resultsDescription: "Your Terrae v2.3 classified images will appear here after processing.",
+    resultsDescription: "Previews show here after each run finishes.",
+    resultsEmptyHint: "Add GeoTIFFs, then Analyze.",
     outputFormatLabel: "GeoTIFF preview",
-    processActionLabel: "Process with Terrae v2.3",
+    processActionLabel: "Analyze",
   },
   "Oscilla v1.7": {
     maxFiles: 250,
     showLargeScaleControls: false,
-    uploadCardTitle: "Upload One Area Across Time",
-    uploadDescription:
-      "Upload imagery of the same location from different time periods. Oscilla v1.7 analyzes land cover changes over time and produces one combined classified land cover result.",
+    uploadCardTitle: "Land Classification Across Time",
+    uploadDescription: "Same place, several dates → one merged land-cover map.",
     uploadHelperText:
-      "Requires at least 3 images. Each filename must start with YYYY_MM_DD (e.g. 2023_05_14.tif). GeoTIFFs must have either 4 bands (B3, B4, B8, B11) or 5 bands (B2, B3, B4, B8, B11).",
-    resultsCardTitle: "Oscilla v1.7 time-series output",
-    resultsDescription:
-      "Oscilla v1.7 will process one area across multiple time periods and generate a single classified land cover image here.",
-    outputFormatLabel: "Single classified image (time-series)",
+      "Requires 3 or more images with file names starting with YYYY_MM_DD.",
+    resultsCardTitle: "Oscilla v1.7 output",
+    resultsDescription: "Single combined preview from your dated stack.",
+    resultsEmptyHint: "Add ≥3 dated GeoTIFFs for one site, then Analyze.",
+    outputFormatLabel: "One merged PNG",
     processActionLabel: "Analyze",
   },
 };
+
+function emptyByModel<T>(value: T): Record<ModelOption, T> {
+  return { "Terrae v2.3": value, "Oscilla v1.7": value };
+}
 
 async function downloadResultsAsZip(
   results: ProcessedResult[],
@@ -77,28 +82,55 @@ async function downloadResultsAsZip(
 }
 
 export default function Home() {
-  const [processedResults, setProcessedResults] = useState<ProcessedResult[]>([]);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processError, setProcessError] = useState<string | null>(null);
+  const [processedResultsByModel, setProcessedResultsByModel] = useState<
+    Record<ModelOption, ProcessedResult[]>
+  >(() => emptyByModel([]));
+  const [isProcessingByModel, setIsProcessingByModel] = useState<Record<ModelOption, boolean>>(
+    () => emptyByModel(false)
+  );
+  const [processingStatusLineByModel, setProcessingStatusLineByModel] = useState<
+    Record<ModelOption, string | null>
+  >(() => emptyByModel(null));
+  const [processErrorByModel, setProcessErrorByModel] = useState<Record<ModelOption, string | null>>(
+    () => emptyByModel(null)
+  );
   const [compactView, setCompactView] = useState(false);
   const [autoDownloadWhenFull, setAutoDownloadWhenFull] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ModelOption>("Terrae v2.3");
+  const [pendingFilesByModel, setPendingFilesByModel] = useState<Record<ModelOption, File[]>>({
+    "Terrae v2.3": [],
+    "Oscilla v1.7": [],
+  });
   const maxResultsInMemory = 500;
   const [batchSize, setBatchSize] = useState(100);
   const [concurrency, setConcurrency] = useState(1);
   const activeModelConfig = modelConfig[selectedModel];
 
-  const CACHE_KEY_RESULTS = "luc_processed_results_v1";
+  const CACHE_KEY_RESULTS_V2 = "luc_processed_results_by_model_v1";
+  const CACHE_KEY_RESULTS_LEGACY = "luc_processed_results_v1";
   const CACHE_KEY_COMPACT = "luc_compact_view_v1";
   const CACHE_MAX_RESULTS = 100;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
-      const cached = window.localStorage.getItem(CACHE_KEY_RESULTS);
-      if (cached) {
-        const parsed = JSON.parse(cached) as ProcessedResult[];
-        if (Array.isArray(parsed)) setProcessedResults(parsed);
+      const v2 = window.localStorage.getItem(CACHE_KEY_RESULTS_V2);
+      if (v2) {
+        const parsed = JSON.parse(v2) as Record<string, unknown>;
+        const terrae = parsed["Terrae v2.3"];
+        const oscilla = parsed["Oscilla v1.7"];
+        setProcessedResultsByModel({
+          "Terrae v2.3": Array.isArray(terrae) ? (terrae as ProcessedResult[]) : [],
+          "Oscilla v1.7": Array.isArray(oscilla) ? (oscilla as ProcessedResult[]) : [],
+        });
+      } else {
+        const legacy = window.localStorage.getItem(CACHE_KEY_RESULTS_LEGACY);
+        if (legacy) {
+          const parsed = JSON.parse(legacy) as ProcessedResult[];
+          if (Array.isArray(parsed)) {
+            setProcessedResultsByModel({ "Terrae v2.3": parsed, "Oscilla v1.7": [] });
+          }
+        }
       }
       const cachedCompact = window.localStorage.getItem(CACHE_KEY_COMPACT);
       if (cachedCompact != null) setCompactView(cachedCompact === "true");
@@ -109,13 +141,14 @@ export default function Home() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    if (autoDownloadWhenFull || processedResults.length > CACHE_MAX_RESULTS) return;
+    if (autoDownloadWhenFull || processedResultsByModel["Terrae v2.3"].length > CACHE_MAX_RESULTS)
+      return;
     try {
-      window.localStorage.setItem(CACHE_KEY_RESULTS, JSON.stringify(processedResults));
+      window.localStorage.setItem(CACHE_KEY_RESULTS_V2, JSON.stringify(processedResultsByModel));
     } catch {
       // ignore quota
     }
-  }, [autoDownloadWhenFull, processedResults]);
+  }, [autoDownloadWhenFull, processedResultsByModel]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -127,8 +160,6 @@ export default function Home() {
   }, [compactView]);
 
   useEffect(() => {
-    setProcessedResults([]);
-    setProcessError(null);
     if (!modelConfig[selectedModel].showLargeScaleControls) {
       setAutoDownloadWhenFull(false);
     }
@@ -139,10 +170,13 @@ export default function Home() {
       ? process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
       : process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-  const processOneFile = async (file: File): Promise<ProcessedResult | null> => {
+  const processOneFile = async (
+    file: File,
+    model: ModelOption
+  ): Promise<ProcessedResult | null> => {
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("model", selectedModel);
+    formData.append("model", model);
     const res = await fetch(`${apiBase}/predict`, {
       method: "POST",
       body: formData,
@@ -182,15 +216,16 @@ export default function Home() {
       height: data.height,
       width: data.width,
     };
-    setProcessedResults([result]);
+    setProcessedResultsByModel((prev) => ({ ...prev, "Oscilla v1.7": [result] }));
   };
 
   const handleProcess = async (files: File[]) => {
     if (!files.length) return;
-    setIsProcessing(true);
-    setProcessError(null);
+    const model = selectedModel;
+    setIsProcessingByModel((p) => ({ ...p, [model]: true }));
+    setProcessErrorByModel((p) => ({ ...p, [model]: null }));
 
-    if (selectedModel === "Oscilla v1.7") {
+    if (model === "Oscilla v1.7") {
       try {
         if (files.length < 3) {
           throw new Error(
@@ -204,29 +239,45 @@ export default function Home() {
             `Filename "${badFile.name}" must start with YYYY_MM_DD (e.g. 2023_05_14.tif) so Oscilla can fit the annual harmonic.`
           );
         }
+        setProcessingStatusLineByModel((p) => ({ ...p, [model]: "Processing 1 of 1" }));
         await processOscillaBatch(files);
       } catch (e) {
-        setProcessError(e instanceof Error ? e.message : "Processing failed");
+        setProcessErrorByModel((p) => ({
+          ...p,
+          [model]: e instanceof Error ? e.message : "Processing failed",
+        }));
       } finally {
-        setIsProcessing(false);
+        setProcessingStatusLineByModel((p) => ({ ...p, [model]: null }));
+        setIsProcessingByModel((p) => ({ ...p, [model]: false }));
       }
       return;
     }
 
     const concurrencyLimit = Math.max(1, Math.min(5, concurrency));
+    const snapAuto = autoDownloadWhenFull;
+    const snapBatch = batchSize;
     try {
       if (concurrencyLimit === 1) {
-        for (const file of files) {
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          setProcessingStatusLineByModel((p) => ({
+            ...p,
+            [model]: `Processing ${i + 1} of ${files.length}`,
+          }));
           try {
-            const nextResult = await processOneFile(file);
+            const nextResult = await processOneFile(file, model);
             if (nextResult) {
-              setProcessedResults((prev) => {
-                if (autoDownloadWhenFull && prev.length >= maxResultsInMemory && batchSize > 0) {
-                  const toZip = prev.slice(0, batchSize);
+              setProcessedResultsByModel((prev) => {
+                const bucket = prev[model];
+                if (snapAuto && bucket.length >= maxResultsInMemory && snapBatch > 0) {
+                  const toZip = bucket.slice(0, snapBatch);
                   downloadResultsAsZip(toZip, `land-use-classifications-batch-${Date.now()}`).catch(() => {});
-                  return [...prev.slice(batchSize), nextResult];
+                  return {
+                    ...prev,
+                    [model]: [...bucket.slice(snapBatch), nextResult],
+                  };
                 }
-                return [...prev, nextResult];
+                return { ...prev, [model]: [...bucket, nextResult] };
               });
             }
           } catch (e) {
@@ -235,33 +286,55 @@ export default function Home() {
         }
       } else {
         let nextIndex = 0;
+        let finished = 0;
+        setProcessingStatusLineByModel((p) => ({
+          ...p,
+          [model]: `Processing 0 of ${files.length}`,
+        }));
         const processNext = async (): Promise<void> => {
           const i = nextIndex++;
           if (i >= files.length) return;
           const file = files[i];
           try {
-            const nextResult = await processOneFile(file);
+            const nextResult = await processOneFile(file, model);
             if (nextResult) {
-              setProcessedResults((prev) => {
-                if (autoDownloadWhenFull && prev.length >= maxResultsInMemory && batchSize > 0) {
-                  const toZip = prev.slice(0, batchSize);
+              setProcessedResultsByModel((prev) => {
+                const bucket = prev[model];
+                if (snapAuto && bucket.length >= maxResultsInMemory && snapBatch > 0) {
+                  const toZip = bucket.slice(0, snapBatch);
                   downloadResultsAsZip(toZip, `land-use-classifications-batch-${Date.now()}`).catch(() => {});
-                  return [...prev.slice(batchSize), nextResult];
+                  return {
+                    ...prev,
+                    [model]: [...bucket.slice(snapBatch), nextResult],
+                  };
                 }
-                return [...prev, nextResult];
+                return { ...prev, [model]: [...bucket, nextResult] };
               });
             }
           } catch (e) {
-            setProcessError(e instanceof Error ? e.message : "Processing failed");
+            setProcessErrorByModel((p) => ({
+              ...p,
+              [model]: e instanceof Error ? e.message : "Processing failed",
+            }));
+          } finally {
+            finished += 1;
+            setProcessingStatusLineByModel((p) => ({
+              ...p,
+              [model]: `Processing ${finished} of ${files.length}`,
+            }));
           }
           await processNext();
         };
         await Promise.all(Array.from({ length: concurrencyLimit }, () => processNext()));
       }
     } catch (e) {
-      setProcessError(e instanceof Error ? e.message : "Processing failed");
+      setProcessErrorByModel((p) => ({
+        ...p,
+        [model]: e instanceof Error ? e.message : "Processing failed",
+      }));
     } finally {
-      setIsProcessing(false);
+      setProcessingStatusLineByModel((p) => ({ ...p, [model]: null }));
+      setIsProcessingByModel((p) => ({ ...p, [model]: false }));
     }
   };
 
@@ -381,10 +454,17 @@ export default function Home() {
         </header>
         <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
           <FileUpload
+            files={pendingFilesByModel[selectedModel]}
+            onFilesChange={(next) =>
+              setPendingFilesByModel((prev) => ({ ...prev, [selectedModel]: next }))
+            }
             onProcess={handleProcess}
-            isProcessing={isProcessing}
-            processError={processError}
-            clearProcessError={() => setProcessError(null)}
+            isProcessing={isProcessingByModel[selectedModel]}
+            processingStatusLine={processingStatusLineByModel[selectedModel]}
+            processError={processErrorByModel[selectedModel]}
+            clearProcessError={() =>
+              setProcessErrorByModel((p) => ({ ...p, [selectedModel]: null }))
+            }
             compactView={compactView}
             maxFiles={autoDownloadWhenFull ? 10_000 : activeModelConfig.maxFiles}
             title={activeModelConfig.uploadCardTitle}
@@ -393,13 +473,17 @@ export default function Home() {
             helperText={activeModelConfig.uploadHelperText}
           />
           <ProcessedFiles
-            processedResults={processedResults}
+            processedResults={processedResultsByModel[selectedModel]}
             compactView={compactView}
-            onClearResults={() => setProcessedResults([])}
+            onClearResults={() =>
+              setProcessedResultsByModel((p) => ({ ...p, [selectedModel]: [] }))
+            }
             autoDownloadWhenFull={autoDownloadWhenFull}
             title={activeModelConfig.resultsCardTitle}
             description={activeModelConfig.resultsDescription}
             outputFormatLabel={activeModelConfig.outputFormatLabel}
+            resultsEmptyHint={activeModelConfig.resultsEmptyHint}
+            singleCombinedOutput={selectedModel === "Oscilla v1.7"}
           />
         </div>
       </div>
