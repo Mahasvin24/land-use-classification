@@ -1,14 +1,13 @@
 "use client"
 
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { ImageIcon, Scan, CheckCircle2, Download } from "lucide-react";
+import { ImageIcon, Scan, CheckCircle2, Download, X } from "lucide-react";
 import JSZip from "jszip";
-import { cn } from "@/lib/utils";
 import type { ProcessedResult } from "@/app/page";
 
 const VIRTUALIZE_THRESHOLD = 100;
@@ -60,6 +59,29 @@ export default function ProcessedFiles({
   const hasResults = processedResults.length > 0;
   const inputListRef = useRef<HTMLDivElement>(null);
   const thumbnailGridRef = useRef<HTMLDivElement>(null);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const activePreview =
+    previewIndex !== null ? processedResults[previewIndex] ?? null : null;
+
+  useEffect(() => {
+    if (activePreview === null) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPreviewIndex(null);
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [activePreview]);
+
+  useEffect(() => {
+    if (previewIndex !== null && previewIndex >= processedResults.length) {
+      setPreviewIndex(null);
+    }
+  }, [previewIndex, processedResults.length]);
 
   const useInputVirtual = compactView && processedResults.length > VIRTUALIZE_THRESHOLD;
   const inputVirtualizer = useVirtualizer({
@@ -163,11 +185,18 @@ export default function ProcessedFiles({
                         Combined classification
                       </p>
                       <div className="rounded-md border bg-muted/30 p-3">
-                        <img
-                          src={`data:image/png;base64,${processedResults[0].preview_image_base64}`}
-                          alt={`Classification preview: ${processedResults[0].filename}`}
-                          className="mx-auto max-h-[min(320px,50vh)] w-full object-contain"
-                        />
+                        <button
+                          type="button"
+                          onClick={() => setPreviewIndex(0)}
+                          aria-label={`Open larger preview of ${processedResults[0].filename}`}
+                          className="group/preview block w-full rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                        >
+                          <img
+                            src={`data:image/png;base64,${processedResults[0].preview_image_base64}`}
+                            alt={`Classification preview: ${processedResults[0].filename}`}
+                            className="mx-auto max-h-[min(320px,50vh)] w-full object-contain transition group-hover/preview:opacity-90"
+                          />
+                        </button>
                         <p
                           className="mt-2 text-center text-xs font-medium text-foreground truncate"
                           title={processedResults[0].filename}
@@ -286,9 +315,12 @@ export default function ProcessedFiles({
                                   const result = processedResults[index];
                                   if (!result) return null;
                                   return (
-                                    <div
+                                    <button
                                       key={`${result.filename}-${index}`}
-                                      className="flex flex-col items-center gap-0.5 rounded border bg-muted/30 p-1"
+                                      type="button"
+                                      onClick={() => setPreviewIndex(index)}
+                                      className="flex flex-col items-center gap-0.5 rounded border bg-muted/30 p-1 text-left transition hover:border-primary/60 hover:bg-muted/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                      aria-label={`Open larger preview of ${result.filename}`}
                                     >
                                       <img
                                         src={`data:image/png;base64,${result.preview_image_base64}`}
@@ -301,7 +333,7 @@ export default function ProcessedFiles({
                                       >
                                         {result.filename}
                                       </span>
-                                    </div>
+                                    </button>
                                   );
                                 })}
                               </div>
@@ -310,9 +342,12 @@ export default function ProcessedFiles({
                         ) : (
                           <div className="grid max-h-[280px] grid-cols-4 gap-1.5 p-1 sm:grid-cols-5 md:grid-cols-6">
                             {processedResults.map((result, index) => (
-                              <div
+                              <button
                                 key={`${result.filename}-${index}`}
-                                className="flex flex-col items-center gap-0.5 rounded border bg-muted/30 p-1"
+                                type="button"
+                                onClick={() => setPreviewIndex(index)}
+                                className="flex flex-col items-center gap-0.5 rounded border bg-muted/30 p-1 text-left transition hover:border-primary/60 hover:bg-muted/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                                aria-label={`Open larger preview of ${result.filename}`}
                               >
                                 <img
                                   src={`data:image/png;base64,${result.preview_image_base64}`}
@@ -325,7 +360,7 @@ export default function ProcessedFiles({
                                 >
                                   {result.filename}
                                 </span>
-                              </div>
+                              </button>
                             ))}
                           </div>
                         )}
@@ -375,14 +410,22 @@ export default function ProcessedFiles({
                       {result.height} × {result.width} px
                     </p>
                     <div className="rounded-lg overflow-hidden border bg-background">
-                      <img
-                        src={`data:image/png;base64,${result.preview_image_base64}`}
-                        alt={`Classification preview: ${result.filename}`}
-                        className={cn(
-                          "w-full h-auto object-contain",
-                          singleCombinedOutput ? "max-h-[min(400px,55vh)]" : "max-h-[280px]"
-                        )}
-                      />
+                      <button
+                        type="button"
+                        onClick={() => setPreviewIndex(index)}
+                        aria-label={`Open larger preview of ${result.filename}`}
+                        className="group/preview block w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      >
+                        <img
+                          src={`data:image/png;base64,${result.preview_image_base64}`}
+                          alt={`Classification preview: ${result.filename}`}
+                          className={
+                            singleCombinedOutput
+                              ? "w-full h-auto max-h-[min(400px,55vh)] object-contain transition group-hover/preview:opacity-90"
+                              : "w-full h-auto max-h-[280px] object-contain transition group-hover/preview:opacity-90"
+                          }
+                        />
+                      </button>
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
@@ -452,6 +495,51 @@ export default function ProcessedFiles({
           </div>
         </div>
       </CardContent>
+      {activePreview && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Preview of ${activePreview.filename}`}
+          onClick={() => setPreviewIndex(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="relative flex h-[95vh] w-[95vw] flex-col overflow-hidden rounded-lg border bg-background shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
+              <div className="min-w-0 space-y-0.5">
+                <p
+                  className="truncate text-sm font-medium"
+                  title={activePreview.filename}
+                >
+                  {activePreview.filename}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {activePreview.height} × {activePreview.width} px
+                </p>
+              </div>
+              <Button
+                size="icon"
+                variant="ghost"
+                type="button"
+                onClick={() => setPreviewIndex(null)}
+                aria-label="Close preview"
+                className="h-8 w-8 shrink-0"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-muted/30 p-4">
+              <img
+                src={`data:image/png;base64,${activePreview.preview_image_base64}`}
+                alt={`Classification preview: ${activePreview.filename}`}
+                className="h-full w-full object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </Card>
   );
 }

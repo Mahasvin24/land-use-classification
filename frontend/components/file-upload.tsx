@@ -343,14 +343,13 @@ export default function FileUpload({
             </p>
           )}
           <Button
-            variant={isProcessing ? "outline" : "default"}
+            variant="default"
             disabled={files.length === 0 || isProcessing}
             type="button"
             onClick={() => onProcess?.(files)}
             className={cn(
-              isProcessing && "max-w-full min-w-0 sm:max-w-md",
               isProcessing &&
-                "disabled:cursor-wait disabled:opacity-100 disabled:text-foreground [&_svg]:text-foreground"
+                "max-w-full min-w-0 sm:max-w-md disabled:cursor-wait disabled:opacity-100"
             )}
           >
             {isProcessing ? (
