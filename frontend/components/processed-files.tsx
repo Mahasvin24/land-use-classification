@@ -28,6 +28,9 @@ type ProcessedFilesProps = {
   onClearResults?: () => void;
   compactView?: boolean;
   autoDownloadWhenFull?: boolean;
+  title?: string;
+  description?: string;
+  outputFormatLabel?: string;
 };
 
 export default function ProcessedFiles({
@@ -35,6 +38,9 @@ export default function ProcessedFiles({
   onClearResults,
   compactView = false,
   autoDownloadWhenFull = false,
+  title = "Processed output",
+  description = "Your classified images will appear here after processing.",
+  outputFormatLabel = "GeoTIFF preview",
 }: ProcessedFilesProps) {
   const hasResults = processedResults.length > 0;
   const inputListRef = useRef<HTMLDivElement>(null);
@@ -77,7 +83,7 @@ export default function ProcessedFiles({
     <Card className="border-border/60 shadow-sm">
       <CardHeader className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <CardTitle className="text-xl">Processed output</CardTitle>
+          <CardTitle className="text-xl">{title}</CardTitle>
           <div className="flex items-center gap-2">
             <Badge
               variant={hasResults ? "default" : "outline"}
@@ -98,7 +104,7 @@ export default function ProcessedFiles({
           </div>
         </div>
         <p className="text-sm text-muted-foreground">
-          Your classified images will appear here after processing.
+          {description}
           {autoDownloadWhenFull && hasResults && (
             <span className="ml-1 font-medium">({processedResults.length} in memory)</span>
           )}
@@ -356,7 +362,7 @@ export default function ProcessedFiles({
             <p className="text-xs uppercase tracking-wide text-muted-foreground">
               Output format
             </p>
-            <p className="text-sm font-medium">GeoTIFF preview</p>
+            <p className="text-sm font-medium">{outputFormatLabel}</p>
           </div>
           <div className="rounded-lg border bg-background p-4">
             <p className="text-xs uppercase tracking-wide text-muted-foreground">

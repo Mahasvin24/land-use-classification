@@ -19,6 +19,10 @@ type FileUploadProps = {
   clearProcessError?: () => void;
   compactView?: boolean;
   maxFiles?: number;
+  title?: string;
+  description?: string;
+  processActionLabel?: string;
+  helperText?: string;
 };
 
 function formatBytes(bytes: number) {
@@ -37,6 +41,10 @@ export default function FileUpload({
   clearProcessError,
   compactView = false,
   maxFiles = DEFAULT_MAX_FILES,
+  title = "Upload Satellite Imagery",
+  description = "Upload one or many satellite images to generate color-coded land use classifications.",
+  processActionLabel = "Process",
+  helperText,
 }: FileUploadProps) {
   const [files, setFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -89,16 +97,18 @@ export default function FileUpload({
     <Card className="border-border/60 shadow-sm">
       <CardHeader className="space-y-2">
         <div className="flex items-center justify-between">
-          <CardTitle className="text-xl">Upload Satellite Imagery</CardTitle>
+          <CardTitle className="text-xl">{title}</CardTitle>
           <Badge variant="secondary" className="gap-1">
             <Sparkles className="h-3.5 w-3.5" />
             AI Powered
           </Badge>
         </div>
         <p className="text-sm text-muted-foreground">
-          Upload one or many satellite images to generate color-coded land use
-          classifications. Up to {maxFiles} files.
+          {description} Up to {maxFiles} files.
         </p>
+        {helperText && (
+          <p className="text-xs text-muted-foreground">{helperText}</p>
+        )}
       </CardHeader>
       <CardContent className="space-y-5">
         <div
@@ -326,7 +336,7 @@ export default function FileUpload({
           >
             {isProcessing
               ? "Processing…"
-              : `Process ${files.length > 0 ? `(${files.length} file${files.length !== 1 ? "s" : ""})` : ""}`}
+              : `${processActionLabel}${files.length > 0 ? ` (${files.length} file${files.length !== 1 ? "s" : ""})` : ""}`}
           </Button>
         </div>
       </CardContent>
