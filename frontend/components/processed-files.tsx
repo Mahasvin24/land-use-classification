@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,6 +22,8 @@ const CLASS_COLORS: Record<number, string> = {
   5: "#b4b4b4", // Bare
   6: "#0064ff", // Water
 };
+const GENERAL_VEGETATION_COLOR: [number, number, number] = [63, 143, 63];
+const GENERAL_VEGETATION_CLASSES = new Set([0, 1, 2]);
 
 type ProcessedFilesProps = {
   processedResults: ProcessedResult[];
@@ -35,14 +37,38 @@ type ProcessedFilesProps = {
   resultsEmptyHint?: string;
   /** True when the pipeline always returns a single merged result (e.g. Oscilla time series). */
   singleCombinedOutput?: boolean;
+  /** Class IDs that should stay highlighted; non-selected classes are grayed out. */
+  selectedClassIds?: number[];
+  /** When true, forest/shrubland/grassland are rendered with one shared color. */
+  generalVegetationActive?: boolean;
 };
 
-function downloadSinglePng(result: ProcessedResult, index: number) {
+function downloadSinglePng(result: ProcessedResult, index: number, imageUrl?: string) {
   const baseName = result.filename.replace(/\.(tif|tiff)$/i, "") || `classification-${index}`;
   const a = document.createElement("a");
-  a.href = `data:image/png;base64,${result.preview_image_base64}`;
+  a.href = imageUrl ?? `data:image/png;base64,${result.preview_image_base64}`;
   a.download = `${baseName}-classification.png`;
   a.click();
+}
+
+function hexToRgb(hex: string): [number, number, number] | null {
+  const normalized = hex.replace("#", "");
+  if (normalized.length !== 6) return null;
+  const value = Number.parseInt(normalized, 16);
+  if (Number.isNaN(value)) return null;
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
+}
+
+function classIdFromRgb(
+  r: number,
+  g: number,
+  b: number,
+  colorEntries: Array<[number, [number, number, number]]>
+): number | null {
+  for (const [classId, [cr, cg, cb]] of colorEntries) {
+    if (r === cr && g === cg && b === cb) return classId;
+  }
+  return null;
 }
 
 export default function ProcessedFiles({
@@ -55,13 +81,35 @@ export default function ProcessedFiles({
   outputFormatLabel = "GeoTIFF preview",
   resultsEmptyHint = "Upload one or more images to generate land use classification previews.",
   singleCombinedOutput = false,
+  selectedClassIds = [0, 1, 2, 3, 4, 5, 6],
+  generalVegetationActive = false,
 }: ProcessedFilesProps) {
   const hasResults = processedResults.length > 0;
   const inputListRef = useRef<HTMLDivElement>(null);
   const thumbnailGridRef = useRef<HTMLDivElement>(null);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [filteredPreviewDataUrls, setFilteredPreviewDataUrls] = useState<Record<number, string>>({});
   const activePreview =
     previewIndex !== null ? processedResults[previewIndex] ?? null : null;
+  const selectedClassIdsKey = useMemo(
+    () => [...selectedClassIds].sort((a, b) => a - b).join(","),
+    [selectedClassIds]
+  );
+  const selectedClassSet = useMemo(() => new Set(selectedClassIds), [selectedClassIds]);
+  const classColorEntries = useMemo(
+    () =>
+      Object.entries(CLASS_COLORS)
+        .map(([id, color]) => {
+          const rgb = hexToRgb(color);
+          if (!rgb) return null;
+          return [Number(id), rgb] as [number, [number, number, number]];
+        })
+        .filter((entry): entry is [number, [number, number, number]] => entry !== null),
+    []
+  );
+  const shouldTransform =
+    selectedClassIds.length < classColorEntries.length || generalVegetationActive;
+  const previewFilterCacheRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     if (activePreview === null) return;
@@ -83,6 +131,93 @@ export default function ProcessedFiles({
     }
   }, [previewIndex, processedResults.length]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!processedResults.length) {
+      setFilteredPreviewDataUrls({});
+      return;
+    }
+    if (!shouldTransform) {
+      setFilteredPreviewDataUrls({});
+      return;
+    }
+
+    const buildFilteredDataUrl = async (base64: string): Promise<string> => {
+      const cacheKey = `${base64.slice(0, 64)}:${base64.length}:${selectedClassIdsKey}:veg=${generalVegetationActive ? "1" : "0"}`;
+      const cached = previewFilterCacheRef.current.get(cacheKey);
+      if (cached) return cached;
+
+      const image = new Image();
+      image.src = `data:image/png;base64,${base64}`;
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () => reject(new Error("Failed to load preview image for filtering"));
+      });
+
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return `data:image/png;base64,${base64}`;
+
+      ctx.drawImage(image, 0, 0);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imageData.data;
+      const gray: [number, number, number] = [140, 140, 140];
+
+      for (let i = 0; i < data.length; i += 4) {
+        const alpha = data[i + 3];
+        if (alpha === 0) continue;
+        const classId = classIdFromRgb(data[i], data[i + 1], data[i + 2], classColorEntries);
+        if (classId === null) continue;
+        if (!selectedClassSet.has(classId)) {
+          data[i] = gray[0];
+          data[i + 1] = gray[1];
+          data[i + 2] = gray[2];
+        } else if (generalVegetationActive && GENERAL_VEGETATION_CLASSES.has(classId)) {
+          data[i] = GENERAL_VEGETATION_COLOR[0];
+          data[i + 1] = GENERAL_VEGETATION_COLOR[1];
+          data[i + 2] = GENERAL_VEGETATION_COLOR[2];
+        }
+      }
+
+      ctx.putImageData(imageData, 0, 0);
+      const dataUrl = canvas.toDataURL("image/png");
+      previewFilterCacheRef.current.set(cacheKey, dataUrl);
+      return dataUrl;
+    };
+
+    const run = async () => {
+      const next: Record<number, string> = {};
+      await Promise.all(
+        processedResults.map(async (result, index) => {
+          try {
+            next[index] = await buildFilteredDataUrl(result.preview_image_base64);
+          } catch {
+            next[index] = `data:image/png;base64,${result.preview_image_base64}`;
+          }
+        })
+      );
+      if (!cancelled) setFilteredPreviewDataUrls(next);
+    };
+    run().catch(() => {
+      if (!cancelled) setFilteredPreviewDataUrls({});
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    classColorEntries,
+    generalVegetationActive,
+    processedResults,
+    selectedClassIdsKey,
+    selectedClassSet,
+    shouldTransform,
+  ]);
+
+  const getPreviewSrc = (result: ProcessedResult, index: number) =>
+    filteredPreviewDataUrls[index] ?? `data:image/png;base64,${result.preview_image_base64}`;
+
   const useInputVirtual = compactView && processedResults.length > VIRTUALIZE_THRESHOLD;
   const inputVirtualizer = useVirtualizer({
     count: processedResults.length,
@@ -102,14 +237,16 @@ export default function ProcessedFiles({
 
   const handlePrimaryDownload = async () => {
     if (singleCombinedOutput && processedResults.length === 1) {
-      downloadSinglePng(processedResults[0], 0);
+      downloadSinglePng(processedResults[0], 0, getPreviewSrc(processedResults[0], 0));
       return;
     }
     const zip = new JSZip();
     processedResults.forEach((result, index) => {
       const baseName = result.filename.replace(/\.(tif|tiff)$/i, "") || `image-${index}`;
       const pngName = `${baseName}-classification.png`;
-      zip.file(pngName, result.preview_image_base64, { base64: true });
+      const dataUrl = getPreviewSrc(result, index);
+      const maybeBase64 = dataUrl.split(",")[1] ?? "";
+      zip.file(pngName, maybeBase64, { base64: true });
     });
     const blob = await zip.generateAsync({ type: "blob" });
     const url = URL.createObjectURL(blob);
@@ -192,7 +329,7 @@ export default function ProcessedFiles({
                           className="group/preview block w-full rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                         >
                           <img
-                            src={`data:image/png;base64,${processedResults[0].preview_image_base64}`}
+                            src={getPreviewSrc(processedResults[0], 0)}
                             alt={`Classification preview: ${processedResults[0].filename}`}
                             className="mx-auto max-h-[min(320px,50vh)] w-full object-contain transition group-hover/preview:opacity-90"
                           />
@@ -323,7 +460,7 @@ export default function ProcessedFiles({
                                       aria-label={`Open larger preview of ${result.filename}`}
                                     >
                                       <img
-                                        src={`data:image/png;base64,${result.preview_image_base64}`}
+                                        src={getPreviewSrc(result, index)}
                                         alt={result.filename}
                                         className="h-14 w-full object-contain object-center"
                                       />
@@ -350,7 +487,7 @@ export default function ProcessedFiles({
                                 aria-label={`Open larger preview of ${result.filename}`}
                               >
                                 <img
-                                  src={`data:image/png;base64,${result.preview_image_base64}`}
+                                  src={getPreviewSrc(result, index)}
                                   alt={result.filename}
                                   className="h-14 w-full object-contain object-center"
                                 />
@@ -417,7 +554,7 @@ export default function ProcessedFiles({
                         className="group/preview block w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                       >
                         <img
-                          src={`data:image/png;base64,${result.preview_image_base64}`}
+                          src={getPreviewSrc(result, index)}
                           alt={`Classification preview: ${result.filename}`}
                           className={
                             singleCombinedOutput
@@ -533,7 +670,7 @@ export default function ProcessedFiles({
             <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-4 overflow-hidden bg-muted/30 p-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:grid-rows-1">
               <div className="flex min-h-0 items-center justify-center overflow-hidden rounded-md border bg-background/70 p-2">
                 <img
-                  src={`data:image/png;base64,${activePreview.preview_image_base64}`}
+                  src={getPreviewSrc(activePreview, previewIndex ?? 0)}
                   alt={`Classification preview: ${activePreview.filename}`}
                   className="h-full w-full object-contain"
                 />

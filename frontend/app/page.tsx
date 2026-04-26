@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import FileUpload from "@/components/file-upload";
@@ -16,6 +16,16 @@ export type ProcessedResult = {
 };
 
 const modelOptions = ["Terrae v2.3", "Oscilla v1.7"] as const;
+const classFilterOptions = [
+  { id: "5", label: "Bare", color: "#b4b4b4" },
+  { id: "6", label: "Water", color: "#0064ff" },
+  { id: "4", label: "Built-up", color: "#fa0000" },
+  { id: "3", label: "Cropland", color: "#f096ff" },
+  { id: "0", label: "Forest", color: "#006400" },
+  { id: "1", label: "Shrubland", color: "#ffbb22" },
+  { id: "2", label: "Grassland", color: "#ffff4c" },
+] as const;
+const vegetationClassIds = ["0", "1", "2"] as const;
 type ModelOption = (typeof modelOptions)[number];
 type ModelConfig = {
   maxFiles: number;
@@ -104,7 +114,56 @@ export default function Home() {
   const maxResultsInMemory = 500;
   const [batchSize, setBatchSize] = useState(100);
   const [concurrency, setConcurrency] = useState(1);
+  const [activeClassFilters, setActiveClassFilters] = useState<Record<string, boolean>>({
+    "0": true,
+    "1": true,
+    "2": true,
+    "3": true,
+    "4": true,
+    "5": true,
+    "6": true,
+    veg: false,
+  });
   const activeModelConfig = modelConfig[selectedModel];
+  const selectedClassIds = useMemo(() => {
+    const selected = new Set<number>();
+    Object.entries(activeClassFilters).forEach(([key, enabled]) => {
+      if (!enabled) return;
+      if (key === "veg") {
+        [0, 1, 2].forEach((id) => selected.add(id));
+        return;
+      }
+      const parsed = Number(key);
+      if (!Number.isNaN(parsed)) selected.add(parsed);
+    });
+    return Array.from(selected).sort((a, b) => a - b);
+  }, [activeClassFilters]);
+
+  const setFilter = (id: string, checked: boolean) => {
+    setActiveClassFilters((prev) => {
+      const next = { ...prev };
+
+      if (id === "veg") {
+        next.veg = checked;
+        if (checked) {
+          vegetationClassIds.forEach((vegId) => {
+            next[vegId] = false;
+          });
+        } else {
+          vegetationClassIds.forEach((vegId) => {
+            next[vegId] = true;
+          });
+        }
+        return next;
+      }
+
+      next[id] = checked;
+      if (checked && vegetationClassIds.includes(id as (typeof vegetationClassIds)[number])) {
+        next.veg = false;
+      }
+      return next;
+    });
+  };
 
   const CACHE_KEY_RESULTS_V2 = "luc_processed_results_by_model_v1";
   const CACHE_KEY_RESULTS_LEGACY = "luc_processed_results_v1";
@@ -450,6 +509,60 @@ export default function Home() {
                 )}
               </div>
             </div>
+            <div className="min-w-0">
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Classifications
+              </p>
+              <div className="flex min-h-8 flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Switch
+                    checked={activeClassFilters.veg}
+                    onCheckedChange={(checked) => setFilter("veg", checked)}
+                    aria-label="Toggle general vegetation"
+                  />
+                  <span
+                    className="h-2.5 w-2.5 shrink-0 rounded-full border border-border/70"
+                    style={{ backgroundColor: "#3f8f3f" }}
+                    aria-hidden
+                  />
+                  <span className="select-none whitespace-nowrap font-medium">General vegetation</span>
+                </label>
+                <span className="mx-1 h-5 w-px bg-border/70" aria-hidden />
+                {classFilterOptions.map((option) => {
+                  const isChecked = activeClassFilters[option.id];
+                  const isVegSpecificClass = vegetationClassIds.includes(
+                    option.id as (typeof vegetationClassIds)[number]
+                  );
+                  const isDisabled = Boolean(activeClassFilters.veg && isVegSpecificClass);
+                  return (
+                    <label
+                      key={option.id}
+                      className={`flex items-center gap-2 px-2.5 py-1 text-xs transition ${
+                        isDisabled
+                          ? "cursor-not-allowed text-muted-foreground/40"
+                          : isChecked
+                            ? "cursor-pointer rounded-sm border border-black/40 bg-muted/8 text-foreground"
+                          : "cursor-pointer text-muted-foreground hover:text-foreground"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        disabled={isDisabled}
+                        onChange={(e) => setFilter(option.id, e.target.checked)}
+                        className="h-3.5 w-3.5 rounded border border-border/70 bg-transparent accent-primary"
+                      />
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full border border-border/70"
+                        style={{ backgroundColor: option.color }}
+                        aria-hidden
+                      />
+                      <span className="select-none whitespace-nowrap">{option.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </header>
         <div className="grid gap-6 lg:grid-cols-[1.1fr_1fr]">
@@ -484,6 +597,8 @@ export default function Home() {
             outputFormatLabel={activeModelConfig.outputFormatLabel}
             resultsEmptyHint={activeModelConfig.resultsEmptyHint}
             singleCombinedOutput={selectedModel === "Oscilla v1.7"}
+            selectedClassIds={selectedClassIds}
+            generalVegetationActive={activeClassFilters.veg}
           />
         </div>
       </div>
