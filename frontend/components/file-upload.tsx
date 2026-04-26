@@ -101,7 +101,9 @@ export default function FileUpload({
 
   const clearAll = () => {
     setFiles([]);
-    inputRef.current?.value && (inputRef.current.value = "");
+    if (inputRef.current) {
+      inputRef.current.value = "";
+    }
   };
 
   const handlePickFiles = () => inputRef.current?.click();

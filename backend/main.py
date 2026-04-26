@@ -1,7 +1,7 @@
 # main.py
 from pathlib import Path
 from datetime import datetime
-from typing import List
+from typing import List, Dict, Optional, Tuple
 import io
 import base64
 import re
@@ -80,6 +80,184 @@ CUSTOM_CMAP = ListedColormap(CLASS_COLORS)
 DEFAULT_SMOOTHING_WINDOW = 3
 
 
+_BAND_CODE_TARGET_WAVELENGTH_NM = {
+    "B2": 492.0,   # Blue
+    "B3": 560.0,   # Green
+    "B4": 665.0,   # Red
+    "B8": 842.0,   # NIR
+    "B11": 1610.0, # SWIR1
+}
+_BAND_CODE_WAVELENGTH_TOLERANCE_NM = {
+    "B2": 80.0,
+    "B3": 90.0,
+    "B4": 90.0,
+    "B8": 140.0,
+    "B11": 220.0,
+}
+_BAND_CODE_TOKEN_ALIASES = {
+    "B2": ("b2", "band2", "blue", "coastalblue"),
+    "B3": ("b3", "band3", "green"),
+    "B4": ("b4", "band4", "red"),
+    "B8": ("b8", "band8", "nir", "nir08", "nearinfrared", "nearir"),
+    "B11": ("b11", "band11", "swir1", "swir01", "swir", "shortwaveinfrared1"),
+}
+
+
+def _tokenize_band_text(value: str) -> List[str]:
+    lowered = value.lower().replace("μ", "u").replace("µ", "u")
+    return [tok for tok in re.split(r"[^a-z0-9]+", lowered) if tok]
+
+
+def _to_compact_tokens(tokens: List[str]) -> set:
+    compact = set(tokens)
+    compact.update("".join(tokens[i : i + 2]) for i in range(max(0, len(tokens) - 1)))
+    compact.update("".join(tokens[i : i + 3]) for i in range(max(0, len(tokens) - 2)))
+    return compact
+
+
+def _parse_wavelength_nm(raw_value: object) -> Optional[float]:
+    if raw_value is None:
+        return None
+    text = str(raw_value).strip().lower().replace("μ", "u").replace("µ", "u")
+    if not text:
+        return None
+    match = re.search(r"(-?\d+(?:\.\d+)?)", text)
+    if not match:
+        return None
+    numeric = float(match.group(1))
+    if "um" in text:
+        return numeric * 1000.0
+    if "nm" in text:
+        return numeric
+    # Heuristic: small values are usually micrometers, large values nanometers.
+    if 0.1 <= numeric <= 20:
+        return numeric * 1000.0
+    if 200 <= numeric <= 3000:
+        return numeric
+    return None
+
+
+def _extract_band_hints(src: rasterio.io.DatasetReader) -> List[Dict[str, object]]:
+    hints: List[Dict[str, object]] = []
+    descriptions = src.descriptions or ()
+    for band_idx in src.indexes:
+        per_band_tags = src.tags(band_idx) or {}
+        desc = descriptions[band_idx - 1] if (band_idx - 1) < len(descriptions) else ""
+        text_parts = [str(desc)] + [f"{k}:{v}" for k, v in per_band_tags.items()]
+        tokens = _tokenize_band_text(" ".join(text_parts))
+        compact_tokens = _to_compact_tokens(tokens)
+        wavelength_nm = None
+        for key in (
+            "wavelength",
+            "wavelength_nm",
+            "center_wavelength",
+            "center_wavelength_nm",
+            "band_wavelength",
+            "band_wavelength_nm",
+        ):
+            if key in per_band_tags:
+                wavelength_nm = _parse_wavelength_nm(per_band_tags.get(key))
+                if wavelength_nm is not None:
+                    break
+        hints.append(
+            {
+                "band_idx_1based": band_idx,
+                "tokens": compact_tokens,
+                "wavelength_nm": wavelength_nm,
+            }
+        )
+    return hints
+
+
+def _resolve_required_band_indices(
+    src: rasterio.io.DatasetReader,
+    required_codes: List[str],
+    context_name: str,
+    positional_fallback: Optional[List[int]] = None,
+) -> Tuple[List[int], str]:
+    hints = _extract_band_hints(src)
+    selected: Dict[str, int] = {}
+    used_band_indices = set()
+
+    # Pass 1: explicit token matches from descriptions/tags.
+    for code in required_codes:
+        aliases = _BAND_CODE_TOKEN_ALIASES[code]
+        candidates = [
+            i
+            for i, hint in enumerate(hints)
+            if i not in used_band_indices and any(alias in hint["tokens"] for alias in aliases)
+        ]
+        if len(candidates) > 1:
+            candidate_bands = ", ".join(str(hints[i]["band_idx_1based"]) for i in candidates)
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{context_name}: ambiguous metadata for {code}; matching bands: "
+                    f"{candidate_bands}. Please export with unambiguous band metadata."
+                ),
+            )
+        if len(candidates) == 1:
+            selected[code] = candidates[0]
+            used_band_indices.add(candidates[0])
+
+    # Pass 2: wavelength-based matches for unresolved required bands.
+    unresolved = [code for code in required_codes if code not in selected]
+    for code in unresolved:
+        target = _BAND_CODE_TARGET_WAVELENGTH_NM[code]
+        tolerance = _BAND_CODE_WAVELENGTH_TOLERANCE_NM[code]
+        candidates: List[Tuple[float, int]] = []
+        for i, hint in enumerate(hints):
+            if i in used_band_indices:
+                continue
+            wavelength = hint["wavelength_nm"]
+            if wavelength is None:
+                continue
+            diff = abs(float(wavelength) - target)
+            if diff <= tolerance:
+                candidates.append((diff, i))
+        if not candidates:
+            continue
+        candidates.sort(key=lambda t: t[0])
+        if len(candidates) > 1 and abs(candidates[0][0] - candidates[1][0]) < 1e-6:
+            b1 = hints[candidates[0][1]]["band_idx_1based"]
+            b2 = hints[candidates[1][1]]["band_idx_1based"]
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{context_name}: ambiguous wavelength mapping for {code} between "
+                    f"bands {b1} and {b2}. Please provide clearer band metadata."
+                ),
+            )
+        chosen = candidates[0][1]
+        selected[code] = chosen
+        used_band_indices.add(chosen)
+
+    unresolved = [code for code in required_codes if code not in selected]
+    if unresolved:
+        if positional_fallback is not None:
+            if src.count < len(positional_fallback):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"{context_name}: could not identify required bands "
+                        f"{', '.join(unresolved)} from metadata, and file has only "
+                        f"{src.count} bands."
+                    ),
+                )
+            return [i - 1 for i in positional_fallback], "fallback"
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{context_name}: could not identify required bands "
+                f"{', '.join(unresolved)} from metadata/wavelength. "
+                "Please include explicit band names or center wavelengths."
+            ),
+        )
+
+    ordered_zero_based = [selected[code] for code in required_codes]
+    return ordered_zero_based, "metadata"
+
+
 def majority_filter(prediction_map: np.ndarray, window_size: int = DEFAULT_SMOOTHING_WINDOW) -> np.ndarray:
     """Replace each pixel with the most common class in its NxN neighborhood.
 
@@ -131,22 +309,37 @@ def majority_filter(prediction_map: np.ndarray, window_size: int = DEFAULT_SMOOT
 
 def preprocess_geotiff(contents: bytes, n_features: int):
     """
-    Mirror training script: load GeoTIFF, validate 4 bands, optionally add NDVI for 5-feature model.
+    Mirror training script: load GeoTIFF, require at least the needed Terrae bands,
+    and optionally add NDVI for a 5-feature model.
     Returns (pixels array shape (n_pixels, n_features), height, width).
     """
     try:
         with rasterio.open(io.BytesIO(contents)) as src:
-            img = src.read().astype(np.float32)  # shape: [Bands, Height, Width]
+            band_indices, _selection_mode = _resolve_required_band_indices(
+                src=src,
+                required_codes=["B2", "B3", "B4", "B8"],
+                context_name="Terrae",
+                positional_fallback=[1, 2, 3, 4],
+            )
+            img = src.read(indexes=[i + 1 for i in band_indices]).astype(np.float32)
     except Exception as e:
+        if isinstance(e, HTTPException):
+            raise
         raise HTTPException(
             status_code=400,
-            detail=f"Failed to open GeoTIFF: {str(e)}. Expected a valid 4-band (B2, B3, B4, B8) raster.",
+            detail=(
+                f"Failed to open GeoTIFF: {str(e)}. Expected a valid raster that "
+                "includes B2, B3, B4, and B8 in the first 4 bands."
+            ),
         )
 
     if img.shape[0] != 4:
         raise HTTPException(
             status_code=400,
-            detail=f"Expected 4 bands (B2, B3, B4, B8), but got {img.shape[0]} bands.",
+            detail=(
+                f"Expected 4 selected bands (B2, B3, B4, B8), but got "
+                f"{img.shape[0]} bands."
+            ),
         )
 
     h, w = img.shape[1], img.shape[2]
@@ -247,7 +440,6 @@ _OSCILLA_DATE_RE = re.compile(r"^(\d{4})_(\d{2})_(\d{2})")
 # Oscilla only mathematically needs Green, Red, NIR, SWIR1. Two layouts are allowed:
 #   4 bands: B3, B4, B8, B11
 #   5 bands: B2, B3, B4, B8, B11 (Blue is ignored)
-_OSCILLA_ALLOWED_BAND_COUNTS = (4, 5)
 _OSCILLA_FEATURE_COUNT = 9   # 3 indices x (mean, amp, phase)
 _OSCILLA_MIN_DATES = 3
 
@@ -274,23 +466,40 @@ def _oscilla_parse_date(name: str) -> datetime:
         )
 
 
+def _oscilla_select_required_bands(img: np.ndarray, name: str) -> np.ndarray:
+    """Return a 4-band stack [B3, B4, B8, B11] from flexible input band counts.
+
+    Accepted fallback layouts:
+      - >=5 bands where the first 5 are [B2, B3, B4, B8, B11]
+      - exactly 4 bands as [B3, B4, B8, B11]
+
+    Any extra trailing bands are ignored.
+    """
+    if img.shape[0] >= 5:
+        # Common Sentinel ordering includes blue first; drop blue and keep
+        # [green, red, nir, swir1].
+        return img[[1, 2, 3, 4], :, :]
+    if img.shape[0] == 4:
+        return img
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            f"Oscilla requires at least 4 ordered bands to derive "
+            f"(B3, B4, B8, B11), but '{name}' has {img.shape[0]}."
+        ),
+    )
+
+
 def _oscilla_compute_indices(img: np.ndarray):
     """Compute (NDVI, NDBI, MNDWI) as (H, W) float32 arrays.
 
-    Supports two band layouts:
-      - 4 bands in order [B3 (Green), B4 (Red), B8 (NIR), B11 (SWIR1)]
-      - 5 bands in order [B2 (Blue), B3 (Green), B4 (Red), B8 (NIR), B11 (SWIR1)]
-    Blue is not used in any of the three indices; it is accepted but ignored in
-    the 5-band case because that ordering matches common Sentinel-2 exports.
+    Expects exactly 4 bands in order [B3 (Green), B4 (Red), B8 (NIR), B11 (SWIR1)].
     """
-    if img.shape[0] == 5:
-        green, red, nir, swir = img[1], img[2], img[3], img[4]
-    elif img.shape[0] == 4:
-        green, red, nir, swir = img[0], img[1], img[2], img[3]
-    else:
+    if img.shape[0] != 4:
         raise ValueError(
-            f"Unsupported band count {img.shape[0]}; expected 4 or 5."
+            f"Unsupported band count {img.shape[0]}; expected 4."
         )
+    green, red, nir, swir = img[0], img[1], img[2], img[3]
     eps = 1e-10
     ndvi = (nir - red) / (nir + red + eps)
     ndbi = (swir - nir) / (swir + nir + eps)
@@ -361,26 +570,26 @@ async def predict_oscilla(
 
         try:
             with rasterio.open(io.BytesIO(contents)) as src:
-                img = src.read().astype(np.float32)
+                fallback_layout = [1, 2, 3, 4] if src.count == 4 else [2, 3, 4, 5]
+                band_indices, _selection_mode = _resolve_required_band_indices(
+                    src=src,
+                    required_codes=["B3", "B4", "B8", "B11"],
+                    context_name=f"Oscilla ({name})",
+                    positional_fallback=fallback_layout,
+                )
+                img = src.read(indexes=[i + 1 for i in band_indices]).astype(np.float32)
         except Exception as e:
+            if isinstance(e, HTTPException):
+                raise
             raise HTTPException(
                 status_code=400,
                 detail=(
                     f"Failed to open GeoTIFF '{name}': {e}. "
-                    "Expected a valid 4-band (B3, B4, B8, B11) or "
-                    "5-band (B2, B3, B4, B8, B11) raster."
+                    "Expected a valid raster containing B3, B4, B8, B11 "
+                    "(or B2, B3, B4, B8, B11 with optional extra trailing bands)."
                 ),
             )
-
-        if img.shape[0] not in _OSCILLA_ALLOWED_BAND_COUNTS:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Oscilla expects 4 bands (B3, B4, B8, B11) or "
-                    f"5 bands (B2, B3, B4, B8, B11) per image; "
-                    f"'{name}' has {img.shape[0]} bands."
-                ),
-            )
+        img = _oscilla_select_required_bands(img, name)
 
         h, w = img.shape[1], img.shape[2]
         if ref_shape is None:

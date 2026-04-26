@@ -530,12 +530,33 @@ export default function ProcessedFiles({
                 <X className="h-4 w-4" />
               </Button>
             </div>
-            <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-muted/30 p-4">
-              <img
-                src={`data:image/png;base64,${activePreview.preview_image_base64}`}
-                alt={`Classification preview: ${activePreview.filename}`}
-                className="h-full w-full object-contain"
-              />
+            <div className="grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_auto] gap-4 overflow-hidden bg-muted/30 p-4 lg:grid-cols-[minmax(0,1fr)_280px] lg:grid-rows-1">
+              <div className="flex min-h-0 items-center justify-center overflow-hidden rounded-md border bg-background/70 p-2">
+                <img
+                  src={`data:image/png;base64,${activePreview.preview_image_base64}`}
+                  alt={`Classification preview: ${activePreview.filename}`}
+                  className="h-full w-full object-contain"
+                />
+              </div>
+              <aside className="min-h-0 overflow-y-auto rounded-md border bg-background p-3">
+                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Class legend
+                </p>
+                <div className="space-y-2">
+                  {Object.entries(activePreview.class_legend).map(([id, label]) => (
+                    <div key={id} className="flex items-center gap-2">
+                      <span
+                        className="h-3.5 w-3.5 shrink-0 rounded border border-border"
+                        style={{ backgroundColor: CLASS_COLORS[Number(id)] ?? "#888" }}
+                        aria-hidden
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {id}: {label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </aside>
             </div>
           </div>
         </div>
