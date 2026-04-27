@@ -57,12 +57,18 @@ def train_harmonic_model(csv_data_path):
         X, y, test_size=0.20, random_state=42, stratify=y
     )
     
-    rf = RandomForestClassifier(n_estimators=200, random_state=42, n_jobs=-1)
+    rf = RandomForestClassifier(
+        n_estimators=400, 
+        class_weight={0:1, 1:1, 2:2.5, 3:0.5, 4:1, 5:1, 6:1}, 
+        random_state=42, 
+        n_jobs=-1
+    )
     rf.fit(X_train, y_train)
     
     print(f"Model Trained. Test Accuracy: {accuracy_score(y_test, rf.predict(X_test)):.4f}")
     joblib.dump(rf, 'harmonic_rf_model.pkl')
     return rf
+
 
 # --- 3. INFERENCE ON .TIFF STACK ---
 def classify_geotiff_stack(image_folder, model_path):
